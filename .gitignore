@@ -1,0 +1,17 @@
+# Build output
+build/
+app/build/
+.gradle/
+.kotlin/
+
+# This machine only
+local.properties
+.idea/
+*.iml
+.DS_Store
+hs_err_pid*.log
+
+# Release files: attach them to a GitHub Release instead
+*.apk
+*.aab
+*.zip

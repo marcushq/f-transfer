@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Camera body with lens and a down arrow: "photos come off the camera". -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M34,38h10l4,-6h12l4,6h10a4,4 0,0 1,4 4v26a4,4 0,0 1,-4 4H34a4,4 0,0 1,-4 -4V42a4,4 0,0 1,4 -4z" />
+    <path
+        android:fillColor="#FF1B5E20"
+        android:pathData="M54,55m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M52,48h4v8h4l-6,7l-6,-7h4z" />
+</vector>
