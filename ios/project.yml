@@ -1,0 +1,29 @@
+# XcodeGen spec: on a Mac run `brew install xcodegen && xcodegen` in this folder,
+# then open FujiTransfer.xcodeproj. See README.md.
+name: FujiTransfer
+options:
+  bundleIdPrefix: dev.fujitransfer
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  FujiTransfer:
+    type: application
+    platform: iOS
+    sources:
+      - path: FujiTransfer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.fujitransfer.ios
+        INFOPLIST_FILE: FujiTransfer/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        # Set your own team in Xcode (Signing & Capabilities) or here.
+        DEVELOPMENT_TEAM: ""
