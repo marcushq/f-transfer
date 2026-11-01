@@ -105,6 +105,10 @@ final class Session: ObservableObject {
     }
     /// The day "Chọn cả ngày" is still reading from the camera, or nil.
     @Published var selectingDay: String?
+    /// What the camera sends for a JPEG: the original, or a copy it resizes itself.
+    @Published var transferSize = TransferSize(rawValue: UserDefaults.standard.string(forKey: "transferSize") ?? "") ?? .original {
+        didSet { UserDefaults.standard.set(transferSize.rawValue, forKey: "transferSize") }
+    }
     /// Portrait shots are shown upright in the grid (reads each file's EXIF; on by default).
     @Published var rotateThumbs = UserDefaults.standard.object(forKey: "rotateThumbs") as? Bool ?? true {
         didSet {
@@ -642,9 +646,15 @@ final class Session: ObservableObject {
 
     // MARK: - Downloading
 
-    func downloadSelected() {
+    /// Downloads the selection; [includeDownloaded] false leaves out what is already on the phone.
+    func downloadSelected(includeDownloaded: Bool = true) {
         guard transfer == nil, !selected.isEmpty else { return }
-        let queue = photos.filter { selected.contains($0.handle) }.map(\.handle)
+        let queue = photos.filter { selected.contains($0.handle) && (includeDownloaded || !$0.downloaded) }.map(\.handle)
+        guard !queue.isEmpty else {
+            selected = []
+            notice = "Các ảnh đã chọn đều đã có trong điện thoại"
+            return
+        }
         cancelTransfer.value = false
         Task { await runDownload(queue) }
     }
@@ -732,6 +742,7 @@ final class Session: ObservableObject {
         var ok = 0
         var failed = 0
         let flag = cancelTransfer
+        let size = transferSize
         for (i, h) in queue.enumerated() {
             if flag.value { break }
             let name = index[h].flatMap { photos[$0].info?.fileName } ?? "#\(h)"
@@ -746,7 +757,7 @@ final class Session: ObservableObject {
                 let info: ObjectInfo = try await onCamera { [camera, weak self] in
                     defer { try? file.close() }
                     var lastUI = Date.distantPast
-                    return try camera!.download(h, isCancelled: { flag.value }, write: { bytes, count in
+                    return try camera!.download(h, size: size, isCancelled: { flag.value }, write: { bytes, count in
                         file.write(Data(bytes[0..<count]))
                     }, progress: { done, total in
                         let now = Date()

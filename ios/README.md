@@ -58,7 +58,9 @@ Bluetooth, local network and Photos permissions are requested on first use (text
   the screen. From iOS 26 a started download keeps going in the background
   (`BGContinuedProcessingTask`) and iOS shows its progress; when that isn't granted, a Live
   Activity (`FujiTransferActivity/`) shows it in the Dynamic Island and on the Lock Screen.
-- Camera-side resizing (S/XS), HEIF→JPEG conversion (iOS reads HEIF natively).
+- HEIF→JPEG conversion: iOS opens HEIF itself and converts when sharing.
+- The Android-only extras: picture-in-picture / bubble progress, and the light/dark switch
+  (the iOS app follows the phone's setting).
 
 ## Credits
 Protocol after the MIT-licensed [libfuji](https://github.com/petabyt/libfuji), with details from

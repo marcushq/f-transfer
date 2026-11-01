@@ -25,6 +25,8 @@ struct GalleryView: View {
     @Binding var showLog: Bool
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
+    /// (already on the phone, selected) while the "download again?" question is up.
+    @State private var askRedownload: (already: Int, chosen: Int)?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -70,6 +72,29 @@ struct GalleryView: View {
             bottomBar.padding(.horizontal, 20).padding(.bottom, 12)
         }
         .background(Film.paper.ignoresSafeArea())
+        .alert(redownloadTitle, isPresented: Binding(get: { askRedownload != nil }, set: { if !$0 { askRedownload = nil } })) {
+            if let a = askRedownload {
+                let fresh = a.chosen - a.already
+                if fresh > 0 {
+                    Button("Chỉ tải \(fresh) ảnh mới") { session.downloadSelected(includeDownloaded: false) }
+                    Button("Tải lại cả \(a.chosen)") { session.downloadSelected() }
+                } else {
+                    Button("Tải lại \(a.chosen) ảnh") { session.downloadSelected() }
+                }
+                Button("Huỷ", role: .cancel) {}
+            }
+        } message: {
+            if let a = askRedownload {
+                Text(a.chosen > a.already
+                     ? "\(a.already) trong \(a.chosen) ảnh đã chọn đã có trong điện thoại. Bạn muốn tải lại những ảnh đó không?"
+                     : "Cả \(a.chosen) ảnh đã chọn đều đã có trong điện thoại. Tải lại sẽ tạo thêm một bản nữa trong thư viện ảnh.")
+            }
+        }
+    }
+
+    private var redownloadTitle: String {
+        guard let a = askRedownload else { return "" }
+        return a.chosen > a.already ? "Có ảnh đã tải rồi" : "Đã tải hết ảnh này"
     }
 
     private var header: some View {
@@ -97,6 +122,13 @@ struct GalleryView: View {
             Menu {
                 Button("Chọn ảnh mới (chưa tải)") { session.selectNew() }
                 Button("Chọn tất cả ảnh đang hiện") { session.selectAll() }
+                Picker("Kích thước khi tải ảnh JPEG", selection: $session.transferSize) {
+                    Text("Ảnh gốc").tag(TransferSize.original)
+                    Text("Nhỏ (S) · thử nghiệm").tag(TransferSize.small)
+                    Text("Rất nhỏ (XS) · thử nghiệm").tag(TransferSize.extraSmall)
+                }
+                .pickerStyle(.menu)
+                .disabled(session.transfer != nil)
                 Toggle("Xoay ảnh thu nhỏ theo hướng chụp", isOn: $session.rotateThumbs)
                 Button(String(format: "Xoá bộ nhớ đệm ảnh (%.1f MB)", Double(MetadataCache.diskBytes()) / 1_048_576)) {
                     session.clearCache()
@@ -112,6 +144,14 @@ struct GalleryView: View {
                     .background(Circle().fill(Film.card))
                     .overlay(Circle().stroke(Film.hairline, lineWidth: 1))
             }
+        }
+    }
+
+    private var sizeLine: String {
+        switch session.transferSize {
+        case .original: return "ẢNH GỐC"
+        case .small: return "CỠ S · MÁY ẢNH THU NHỎ"
+        case .extraSmall: return "CỠ XS · MÁY ẢNH THU NHỎ"
         }
     }
 
@@ -206,11 +246,15 @@ struct GalleryView: View {
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 24).fill(Film.card).shadow(color: .black.opacity(0.15), radius: 12, y: 4))
         } else if !session.selected.isEmpty {
-            Button { session.downloadSelected() } label: {
+            Button {
+                let chosen = session.photos.filter { session.selected.contains($0.handle) }
+                let already = chosen.filter(\.downloaded).count
+                if already > 0 { askRedownload = (already, chosen.count) } else { session.downloadSelected() }
+            } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Tải \(session.selected.count) ảnh về máy").font(Film.sans(18, .bold))
-                        Text("ẢNH GỐC").font(Film.mono(11)).tracking(0.6)
+                        Text(sizeLine).font(Film.mono(11)).tracking(0.6)
                     }
                     Spacer()
                     Image(systemName: "arrow.down.to.line")

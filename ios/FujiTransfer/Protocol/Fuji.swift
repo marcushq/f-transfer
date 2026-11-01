@@ -50,6 +50,8 @@ enum Fuji {
     static let opcObjectSize: UInt32 = 0xDC04
     static let opcObjectFileName: UInt32 = 0xDC07
     static let opcDateCreated: UInt32 = 0xDC08
+    /// Length of the resized copy the camera would send (XApp asks this before a resized read).
+    static let opcCompressedSize: UInt32 = 0xD802
 
     // Response codes
     static let rcOK = 0x2001
@@ -68,6 +70,8 @@ enum Fuji {
     /// XApp's ImageForceCompression: 2 = send the original, 1 = resized.
     static let dpcCompressSmall: UInt32 = 0xD226
     static let dpcCorrectFileSize: UInt32 = 0xD227
+    /// XApp's Resize: 1 = S, 0 = XS (used while D226 = 1).
+    static let dpcResizeRate: UInt32 = 0xD22E
     static let dpcUnknownD22B: UInt32 = 0xD22B
     static let dpcImageImportCount: UInt32 = 0xD620
     static let dpcImageImportHandles: UInt32 = 0xD621
@@ -112,6 +116,21 @@ enum PtpError: LocalizedError {
         case .timeout: return "Máy ảnh không phản hồi. Hãy kiểm tra máy ảnh vẫn đang ở màn hình kết nối không dây."
         case .camera(let m, _): return m
         case .cancelled: return "Đã huỷ"
+        }
+    }
+}
+
+/// What the camera sends over Wi-Fi. Resized copies are made by the camera itself, like XApp's
+/// "Resize" setting, and only for JPEG; HEIF and RAF always come as shot.
+enum TransferSize: String, CaseIterable {
+    case original, small, extraSmall
+
+    /// D22E for a resized copy, nil for the original.
+    var resizeRate: Int? {
+        switch self {
+        case .original: return nil
+        case .small: return 1
+        case .extraSmall: return 0
         }
     }
 }

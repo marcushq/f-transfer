@@ -34,6 +34,8 @@ final class FujiCamera {
     private var importHandles: [UInt32] = []
     /// Current D226 so it is only sent when it changes; the body switches modes on every write.
     private var compressionMode = 0
+    /// Current D22E, likewise.
+    private var resizeRate = -1
     /// ObjectSize (0xDC04) is refused but the other object properties work.
     private var sizePropUnsupported = false
     /// The body didn't answer object properties; use GetObjectInfo for the rest of the session.
@@ -71,6 +73,7 @@ final class FujiCamera {
         xappMode = false
         importHandles = []
         compressionMode = 0
+        resizeRate = -1
         sizePropUnsupported = false
         infoOnly = false
         log("Kết nối TCP \(host):\(cmdPort)")
@@ -376,9 +379,10 @@ final class FujiCamera {
         return r.ok ? r.payload : nil
     }
 
-    /// ObjectSize through GetObjectPropValue, the way XApp learns a file's real length.
-    private func objectSize(_ handle: UInt32) throws -> Int? {
-        guard let b = try objectProp(handle, Fuji.opcObjectSize) else { return nil }
+    /// ObjectSize through GetObjectPropValue, the way XApp learns a file's real length; [prop]
+    /// 0xD802 gives the resized copy's length instead.
+    private func objectSize(_ handle: UInt32, _ prop: UInt32 = Fuji.opcObjectSize) throws -> Int? {
+        guard let b = try objectProp(handle, prop) else { return nil }
         let v: Int
         if b.count >= 8 { v = Int(b.u32(0)) | Int(b.u32(4)) << 32 }
         else if b.count >= 4 { v = Int(b.u32(0)) }
@@ -486,20 +490,42 @@ final class FujiCamera {
         }
     }
 
-    /// D226 = 2: send originals. File reads need D226 ≠ 0 on an X-S20.
+    /// File reads need D226 ≠ 0 on an X-S20; anything already set (original or resized) will do.
     private func requestOriginals() throws {
-        guard xappMode, compressionMode != 2 else { return }
-        let r = try setProp16(Fuji.dpcCompressSmall, 2)
-        if !r.ok { log("D226 = 2 bị từ chối (\(Fuji.hex(r.code)))") }
-        compressionMode = 2
+        if compressionMode <= 0 { try setTransferSize(.original) }
+    }
+
+    /// D226 = 2 sends originals, D226 = 1 resized copies at D22E's size (XApp's Resize). Only
+    /// sent when it changes; the body switches modes on every write.
+    private func setTransferSize(_ size: TransferSize) throws {
+        guard xappMode else { return }
+        if let rate = size.resizeRate, resizeRate != rate {
+            let r = try setProp16(Fuji.dpcResizeRate, rate)
+            if !r.ok { log("D22E = \(rate) bị từ chối (\(Fuji.hex(r.code)))") }
+            resizeRate = rate
+        }
+        let mode = size.resizeRate == nil ? 2 : 1
+        if compressionMode != mode {
+            let r = try setProp16(Fuji.dpcCompressSmall, mode)
+            if !r.ok { log("D226 = \(mode) bị từ chối (\(Fuji.hex(r.code)))") }
+            compressionMode = mode
+        }
+    }
+
+    /// Resizing only applies to JPEG.
+    private func isJpeg(_ handle: UInt32) throws -> Bool {
+        guard let name = try describe(handle)?.fileName.lowercased() else { return false }
+        return name.hasSuffix(".jpg") || name.hasSuffix(".jpeg")
     }
 
     // MARK: - Download
 
     /// Streams one file into [write] in chunks of up to 1 MB. [progress] gets (done, total).
-    /// Returns the file's info with its real size. Never returns half a JPEG.
+    /// Returns the file's info with its real size. Never returns half a JPEG. A JPEG comes as
+    /// [size] (the camera resizes it); every other file as shot.
     func download(
         _ handle: UInt32,
+        size: TransferSize = .original,
         isCancelled: () -> Bool,
         write: ([UInt8], Int) throws -> Void,
         progress: (Int, Int) -> Void
@@ -512,8 +538,22 @@ final class FujiCamera {
             link.setReadTimeout(15)
         }
         var info: ObjectInfo
-        if xappMode {
-            try requestOriginals()
+        var resized = false
+        if try xappMode && size != .original && isJpeg(handle) {
+            // The camera makes the smaller JPEG itself. D227 = 1 so ObjectInfo has a real length;
+            // that may still be the original's, so ask 0xD802 like XApp, and rely on the
+            // end-of-file checks below either way.
+            try setTransferSize(size)
+            try setProp16(Fuji.dpcCorrectFileSize, 1)
+            correctSizeOn = true
+            // 0xD802 first: GetObjectInfo must come right before the first file read.
+            let compressed = try objectSize(handle, Fuji.opcCompressedSize)
+            guard let base = try objectInfo(handle) else { throw PtpError.camera("Không đọc được thông tin ảnh #\(handle)") }
+            info = base
+            if let compressed, compressed < base.size || base.size == 0 { info.size = compressed }
+            resized = true
+        } else if xappMode {
+            try setTransferSize(.original)
             guard let base = try describe(handle) else { throw PtpError.camera("Không đọc được thông tin ảnh #\(handle)") }
             info = base
             if !base.sizeTrusted {
@@ -536,7 +576,7 @@ final class FujiCamera {
             guard let i = try objectInfo(handle) else { throw PtpError.camera("Không đọc được thông tin ảnh #\(handle)") }
             info = i
         }
-        log("Tải \(info.fileName): \(info.size) B")
+        log("Tải \(info.fileName): \(info.size) B" + (resized ? " (máy ảnh thu nhỏ: \(size == .small ? "S" : "XS"))" : ""))
 
         var total = info.size
         var done = 0
@@ -553,7 +593,7 @@ final class FujiCamera {
                 // A JPEG that hasn't reached FF D9 at the announced length: the length was
                 // rounded down, so keep reading until the camera has nothing more. An X-S20 has
                 // announced 4+ MB too little, so the only cap is a size no JPEG reaches.
-                if jpeg && lastTwo != 0xFFD9 && done > 0 && done < Fuji.maxJpegBytes {
+                if jpeg && !resized && lastTwo != 0xFFD9 && done > 0 && done < Fuji.maxJpegBytes {
                     total = done + Fuji.maxPartial
                 } else {
                     break
@@ -577,11 +617,21 @@ final class FujiCamera {
             }
             guard r.ok else { throw PtpError.camera("Lỗi tải \(info.fileName) (\(Fuji.hex(r.code)))", code: r.code) }
             if r.payload.isEmpty {
-                // Nothing past the end while probing past the announced length for FF D9.
-                if done > 0 && done >= info.size { total = done; break }
+                // Nothing past the end: of a resized copy (shorter than announced), or while
+                // probing past the announced length for FF D9.
+                if done > 0 && (resized || done >= info.size) { total = done; break }
                 throw PtpError.camera("Máy ảnh trả về dữ liệu rỗng")
             }
             var take = r.payload.count
+            if resized && take < ask && done + take < total && tail(r.payload, take) == 0xFFD9 {
+                // The camera announced the original's length but the resized JPEG ended here.
+                // Stop now: past the end an X100VI keeps echoing the last bytes.
+                try write(r.payload, take)
+                done += take
+                total = done
+                lastTwo = 0xFFD9
+                break
+            }
             if take < ask && done + take < total {
                 // Same short answer at the same place twice: the object really ends here.
                 if shortEnd == done + take {
@@ -606,8 +656,9 @@ final class FujiCamera {
                 (jpeg ? (lastTwo == 0xFFD9 ? " — JPEG kết thúc đúng" : " — JPEG THIẾU phần cuối") : ""))
         }
         // Never keep half a picture: a JPEG must end with FF D9.
-        if jpeg && done != info.size && lastTwo != 0xFFD9 {
-            throw PtpError.camera("Ảnh tải về không hoàn chỉnh (\(info.fileName), \(done)/\(info.size) B)")
+        if (resized || (jpeg && done != info.size)) && lastTwo != 0xFFD9 {
+            throw PtpError.camera((resized ? "Ảnh thu nhỏ từ máy ảnh không hoàn chỉnh" : "Ảnh tải về không hoàn chỉnh") +
+                                  " (\(info.fileName), \(done)/\(info.size) B)")
         }
         progress(done, done)
         info.size = done
