@@ -9,15 +9,19 @@ enum PhotoSaver {
         return s == .authorized || s == .limited
     }
 
-    /// Adds [url] as a photo (JPEG, HEIF or RAF), moving the file into the library.
+    /// Adds [url] as a photo (JPEG, HEIF or RAF), moving the file into the library, and
+    /// remembers it for the "Đã lưu" tab.
     static func save(_ url: URL, name: String) async throws {
+        var id: String?
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetCreationRequest.forAsset()
             let options = PHAssetResourceCreationOptions()
             options.originalFilename = name
             options.shouldMoveFile = true
             request.addResource(with: .photo, fileURL: url, options: options)
+            id = request.placeholderForCreatedAsset?.localIdentifier
         }
+        if let id { await SavedLibrary.record(id) }
     }
 }
 

@@ -24,6 +24,17 @@ enum ExifOrientation {
         return nil
     }
 
+    /// Degrees to rotate clockwise so the image shows upright. Cameras never write the
+    /// mirrored variants.
+    static func degrees(_ orientation: Int?) -> Int {
+        switch orientation {
+        case 3, 4: return 180
+        case 5, 6: return 90
+        case 7, 8: return 270
+        default: return 0
+        }
+    }
+
     /// Offset of the TIFF header ("II*\0" / "MM\0*") that follows an "Exif\0\0" marker.
     private static func findTiff(_ b: [UInt8]) -> Int? {
         let marker: [UInt8] = [0x45, 0x78, 0x69, 0x66, 0, 0]

@@ -1,6 +1,25 @@
 import SwiftUI
 
-/// The camera's photos, newest first: tap to select, then download.
+/// "20261027" → "27.10".
+private func shortDate(_ day: String) -> String { "\(day.suffix(2)).\(day.dropFirst(4).prefix(2))" }
+
+/// "Hôm nay", "Hôm qua", else the weekday ("Thứ Hai" … "Chủ nhật").
+private func dayTitle(_ day: String) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "yyyyMMdd"
+    f.timeZone = .current
+    guard let date = f.date(from: day) else { return day }
+    let cal = Calendar.current
+    let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: Date())).day ?? 99
+    switch days {
+    case 0: return "Hôm nay"
+    case 1: return "Hôm qua"
+    default:
+        return ["Chủ nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"][cal.component(.weekday, from: date) - 1]
+    }
+}
+
+/// The camera's photos, newest first, by shooting day: tap to select, then download.
 struct GalleryView: View {
     @EnvironmentObject var session: Session
     @Binding var showLog: Bool
@@ -22,11 +41,26 @@ struct GalleryView: View {
                             .padding(.horizontal, 20)
                             .onTapGesture { session.notice = nil }
                     }
+                    if !session.photos.isEmpty { chips }
+                    let groups = session.dayGroups
+                    if session.photos.isEmpty {
+                        emptyNote("Thẻ nhớ trống", "Máy ảnh không trả về ảnh nào. Nếu thẻ nhớ có ảnh, hãy gửi nhật ký kết nối.")
+                    } else if groups.isEmpty {
+                        let allSaved = session.hideDownloaded && session.dayFilter == nil
+                        emptyNote(allSaved ? "Đã tải hết" : "Không có ảnh nào",
+                                  allSaved ? "Mọi ảnh trên thẻ đã ở trong điện thoại." : "Không có ảnh nào khớp bộ lọc.")
+                    }
                     LazyVGrid(columns: columns, spacing: 2) {
-                        ForEach(session.photos) { photo in
-                            Tile(photo: photo, selected: session.selected.contains(photo.handle))
-                                .onAppear { session.requestThumb(photo.handle) }
-                                .onTapGesture { session.toggle(photo.handle) }
+                        ForEach(groups) { group in
+                            Section {
+                                ForEach(group.photos) { photo in
+                                    Tile(photo: photo, selected: session.selected.contains(photo.handle), rotate: session.rotateThumbs)
+                                        .onAppear { session.requestThumb(photo.handle) }
+                                        .onTapGesture { session.toggle(photo.handle) }
+                                }
+                            } header: {
+                                dayHeader(group)
+                            }
                         }
                     }
                     Spacer(minLength: 110)
@@ -47,7 +81,7 @@ struct GalleryView: View {
                     .foregroundStyle(Film.ink)
                 HStack(spacing: 6) {
                     Circle().fill(Film.accent).frame(width: 7, height: 7)
-                    Text(session.selected.isEmpty ? "ĐÃ KẾT NỐI · \(session.photos.count) ẢNH" : "ĐÃ CHỌN \(session.selected.count) ẢNH")
+                    Text(statusLine)
                         .font(Film.mono(11))
                         .tracking(0.6)
                         .foregroundStyle(Film.inkSoft)
@@ -62,6 +96,12 @@ struct GalleryView: View {
             }
             Menu {
                 Button("Chọn ảnh mới (chưa tải)") { session.selectNew() }
+                Button("Chọn tất cả ảnh đang hiện") { session.selectAll() }
+                Toggle("Xoay ảnh thu nhỏ theo hướng chụp", isOn: $session.rotateThumbs)
+                Button(String(format: "Xoá bộ nhớ đệm ảnh (%.1f MB)", Double(MetadataCache.diskBytes()) / 1_048_576)) {
+                    session.clearCache()
+                }
+                .disabled(session.transfer != nil)
                 Button("Nhật ký kết nối") { showLog = true }
                 Button("Ngắt kết nối", role: .destructive) { session.disconnect() }
             } label: {
@@ -73,6 +113,73 @@ struct GalleryView: View {
                     .overlay(Circle().stroke(Film.hairline, lineWidth: 1))
             }
         }
+    }
+
+    private var statusLine: String {
+        if !session.selected.isEmpty { return "ĐÃ CHỌN \(session.selected.count) ẢNH" }
+        let unread = session.unreadCount
+        if unread > 0 { return "ĐANG ĐỌC NGÀY CHỤP \(session.photos.count - unread)/\(session.photos.count)" }
+        return "ĐÃ KẾT NỐI · \(session.photos.count) ẢNH"
+    }
+
+    /// All, not yet downloaded, then one chip per shooting day, newest first.
+    private var chips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Pill(label: "Tất cả", selected: session.dayFilter == nil && !session.hideDownloaded) {
+                    session.dayFilter = nil
+                    session.hideDownloaded = false
+                }
+                Pill(label: "Chưa tải", selected: session.hideDownloaded) { session.hideDownloaded.toggle() }
+                ForEach(session.days, id: \.self) { d in
+                    Pill(label: "\(d.suffix(2)) Th\(Int(d.dropFirst(4).prefix(2)) ?? 0)", selected: session.dayFilter == d) {
+                        session.dayFilter = session.dayFilter == d ? nil : d
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private func dayHeader(_ g: DayGroup) -> some View {
+        let allSelected = g.photos.allSatisfy { session.selected.contains($0.handle) }
+        return HStack(alignment: .center) {
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                Text(g.day.map(dayTitle) ?? "Chưa rõ ngày")
+                    .font(Film.sans(17, .semibold))
+                    .foregroundStyle(Film.ink)
+                Text((g.day.map { shortDate($0) + " · " } ?? "") + "\(g.photos.count) ẢNH")
+                    .font(Film.mono(11))
+                    .tracking(0.6)
+                    .foregroundStyle(Film.inkSoft)
+            }
+            Spacer()
+            if session.transfer == nil {
+                Button {
+                    session.toggleDay(g.day)
+                } label: {
+                    Text(g.day != nil && session.selectingDay == g.day ? "Đang tìm…"
+                         : allSelected ? "Bỏ chọn" : g.day == nil ? "Chọn tất cả" : "Chọn cả ngày")
+                        .font(Film.sans(14, .semibold))
+                        .foregroundStyle(Film.accentText)
+                }
+                .disabled(session.selectingDay != nil)
+            }
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private func emptyNote(_ title: String, _ text: String) -> some View {
+        VStack(spacing: 8) {
+            Text(title).font(Film.sans(20, .semibold)).foregroundStyle(Film.ink)
+            Text(text).font(Film.sans(15)).foregroundStyle(Film.inkSoft).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
+        .padding(.top, 60)
     }
 
     @ViewBuilder
@@ -127,12 +234,13 @@ struct GalleryView: View {
 private struct Tile: View {
     let photo: Photo
     let selected: Bool
+    let rotate: Bool
 
     var body: some View {
         Film.frameEmpty
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                if let thumb = photo.thumb {
+                if let thumb = photo.shownThumb(rotate: rotate) {
                     Image(uiImage: thumb).resizable().scaledToFill()
                 }
             }

@@ -93,7 +93,8 @@ struct ConnectView: View {
             RoundedRectangle(cornerRadius: 28).fill(Film.card)
                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(Film.raised, lineWidth: 1))
             // Product photo: fujifilm-x.com (X-S20 page).
-            Image("camera_xs20")
+            // Loose PNG in the bundle, not an asset catalog, so load it through UIImage.
+            Image(uiImage: UIImage(named: "camera_xs20.png") ?? UIImage())
                 .resizable()
                 .scaledToFit()
                 .frame(height: 124)

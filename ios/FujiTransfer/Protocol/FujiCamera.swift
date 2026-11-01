@@ -43,6 +43,10 @@ final class FujiCamera {
     /// Called about every 2 s while the body is still indexing a freshly inserted card.
     var onPreparingCard: (TimeInterval) -> Void = { _ in }
 
+    /// Set while an EXIF read runs and left set when it throws, so the caller can tell a stall
+    /// came from reading orientations.
+    private(set) var orientationInFlight = false
+
     /// The last command answered Device Busy / Store Not Available.
     var lastWasBusy: Bool { Fuji.isTransient(link.lastCode) }
     /// The command a timeout interrupted, e.g. "0x100A(#6044)".
@@ -428,6 +432,58 @@ final class FujiCamera {
         }
         let r = try link.transaction(Fuji.ocGetThumb, [handle])
         return r.ok && r.payload.count > 100 ? r.payload : nil
+    }
+
+    /// Up to [length] bytes of the file from [offset], or nil if the camera refuses.
+    private func readHead(_ handle: UInt32, _ offset: Int, _ length: Int) throws -> [UInt8]? {
+        let r = try link.transaction(Fuji.ocGetPartialObject, [handle, UInt32(offset), UInt32(length)])
+        return r.ok && !r.payload.isEmpty ? r.payload : nil
+    }
+
+    /// EXIF orientation of a photo, read from the start of the file (the camera's thumbnail is
+    /// never rotated). RAF files carry a JPEG whose offset is a big-endian u32 at byte 84.
+    func orientation(_ handle: UInt32, fileName: String) throws -> Int? {
+        let ext = fileName.split(separator: ".").last.map { $0.lowercased() } ?? ""
+        guard ["jpg", "jpeg", "hif", "heif", "heic", "raf"].contains(ext) else { return nil }
+        // An X-S20 never answers GetPartialObject unless it is set up exactly as for a download:
+        // D226 ≠ 0, D227 = 1, then GetObjectInfo for the same handle right before the read.
+        try requestOriginals()
+        orientationInFlight = true
+        // Fail fast: a stalled read costs the session either way.
+        link.setReadTimeout(8)
+        let sizeFix = try xappMode && setProp16(Fuji.dpcCorrectFileSize, 1).ok
+        defer {
+            if sizeFix && !orientationInFlight { _ = try? setProp16(Fuji.dpcCorrectFileSize, 0) }
+            link.setReadTimeout(15)
+        }
+        if xappMode && !link.lastWas(Fuji.ocGetObjectInfo, handle) {
+            guard try objectInfo(handle) != nil else {
+                orientationInFlight = false
+                return nil
+            }
+        }
+        let result = try readOrientation(handle, ext)
+        orientationInFlight = false
+        return result
+    }
+
+    private func readOrientation(_ handle: UInt32, _ ext: String) throws -> Int? {
+        switch ext {
+        case "jpg", "jpeg":
+            return try readHead(handle, 0, 4096).flatMap(ExifOrientation.parse)
+        case "hif", "heif", "heic":
+            if let o = try readHead(handle, 0, 4096).flatMap(ExifOrientation.parse) { return o }
+            return try readHead(handle, 0, 65536).flatMap(ExifOrientation.parse)
+        case "raf":
+            guard let header = try readHead(handle, 0, 512), header.count >= 92 else { return nil }
+            let jpegOffset = Int(header[84]) << 24 | Int(header[85]) << 16 | Int(header[86]) << 8 | Int(header[87])
+            guard jpegOffset > 0 else { return nil }
+            // Unaligned reads are very slow on Fuji bodies, so start at a 512-byte boundary.
+            let aligned = jpegOffset - jpegOffset % 512
+            return try readHead(handle, aligned, 4096 + (jpegOffset - aligned)).flatMap(ExifOrientation.parse)
+        default:
+            return nil
+        }
     }
 
     /// D226 = 2: send originals. File reads need D226 ≠ 0 on an X-S20.

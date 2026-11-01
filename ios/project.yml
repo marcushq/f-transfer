@@ -4,7 +4,7 @@ name: FujiTransfer
 options:
   bundleIdPrefix: dev.fujitransfer
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
   createIntermediateGroups: true
 settings:
   base:
@@ -19,6 +19,9 @@ targets:
     platform: iOS
     sources:
       - path: FujiTransfer
+      - path: Shared
+    dependencies:
+      - target: FujiTransferActivity
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.fujitransfer.ios
@@ -26,4 +29,18 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
         # Set your own team in Xcode (Signing & Capabilities) or here.
+        DEVELOPMENT_TEAM: ""
+  # Live Activity (Dynamic Island / Lock Screen) for downloads.
+  FujiTransferActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: FujiTransferActivity
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.fujitransfer.ios.activity
+        INFOPLIST_FILE: FujiTransferActivity/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
