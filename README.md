@@ -48,6 +48,9 @@ Cần JDK 17 và Android SDK 36.
 - `SavedPhotos.kt`, `Thumbs.kt` — tab Đã lưu, cắt viền ảnh thu nhỏ, ảnh xem trước trong RAF
 - `ui/` — giao diện Jetpack Compose
 
+## Bản iOS
+Mã nguồn Swift/SwiftUI ở thư mục [`ios/`](ios/), xem [ios/README.md](ios/README.md) để build trên máy Mac.
+
 ## Ghi chú
 Giao thức dựa trên dự án mã nguồn mở [libfuji](https://github.com/petabyt/libfuji) (MIT). Phông chữ Inter Tight và JetBrains Mono theo giấy phép SIL OFL (`licenses/`). Ảnh máy X-S20 trên màn hình kết nối (`app/src/main/res/drawable-nodpi/camera_xs20.png`) lấy từ fujifilm-x.com và thuộc bản quyền FUJIFILM.
 
